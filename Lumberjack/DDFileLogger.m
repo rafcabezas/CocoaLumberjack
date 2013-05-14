@@ -1,7 +1,14 @@
 #import "DDFileLogger.h"
 
 #import <unistd.h>
+#ifndef __COCOTRON__
 #import <sys/attr.h>
+#else
+#include <windows.h>
+#define __BEGIN_DECLS
+#define __END_DECLS
+typedef uint32_t u_int32_t;
+#endif
 #import <sys/xattr.h>
 #import <libkern/OSAtomic.h>
 
@@ -213,7 +220,6 @@
 	NSString *logsDirectory = [[basePath stringByAppendingPathComponent:@"Logs"] stringByAppendingPathComponent:appName];
 
 #endif
-
 	return logsDirectory;
 }
 
@@ -389,12 +395,22 @@
 	CFUUIDRef uuid = CFUUIDCreate(NULL);
 	
 	CFStringRef fullStr = CFUUIDCreateString(NULL, uuid);
+#ifndef __COCOTRON__
 	CFStringRef shortStr = CFStringCreateWithSubstring(NULL, fullStr, CFRangeMake(0, 6));
+#else
+    char *short_c_string[7] = { 0, 0, 0, 0, 0, 0, 0 };
+    memcpy(short_c_string, [fullStr UTF8String], 6);
+    NSString *shortStr = [NSString stringWithUTF8String:short_c_string];
+#endif
 	
 	CFRelease(fullStr);
 	CFRelease(uuid);
-	
-	return [NSMakeCollectable(shortStr) autorelease];
+
+#ifndef __COCOTRON__
+    return [NSMakeCollectable(shortStr) autorelease];
+#else
+    return shortStr;
+#endif
 }
 
 /**
@@ -447,9 +463,22 @@
 
 - (NSString *)formatLogMessage:(DDLogMessage *)logMessage
 {
+    
+#ifdef __COCOTRON__
+    NSDateComponents *components = [[NSCalendar currentCalendar] components:
+                                    NSDayCalendarUnit | NSMonthCalendarUnit | NSYearCalendarUnit |
+                                    NSHourCalendarUnit | NSMinuteCalendarUnit | NSSecondCalendarUnit
+                                                                   fromDate:[NSDate date]];
+    //int milli = ([NSDate timeIntervalSinceReferenceDate] * 1000);
+    return [NSString stringWithFormat:@"%04d/%02d/%02d %02d:%02d:%02d  %@",
+            [components year], [components month], [components day], [components hour], [components minute], [components second],
+            //milli,
+            logMessage->logMsg];
+#else
 	NSString *dateAndTime = [dateFormatter stringFromDate:(logMessage->timestamp)];
 	
 	return [NSString stringWithFormat:@"%@  %@", dateAndTime, logMessage->logMsg];
+#endif
 }
 
 - (void)dealloc
@@ -781,7 +810,7 @@
 	}
 	
 	NSDate *logFileCreationDate = [currentLogFileInfo creationDate];
-	
+
 	NSTimeInterval ti = [logFileCreationDate timeIntervalSinceReferenceDate];
 	ti += rollingFrequency;
 	
@@ -1126,8 +1155,53 @@
 		}
 		
 	#else
-		
-		creationDate = [[[self fileAttributes] objectForKey:NSFileCreationDate] retain];
+        #if __COCOTRON__ == 1
+        {
+            HANDLE hFile;
+            if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+                const char *path = [filePath UTF8String];
+                hFile = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+                if (hFile != INVALID_HANDLE_VALUE) {
+                    FILETIME ftCreate, ftAccess, ftWrite;
+                    SYSTEMTIME stUTC, stLocal;
+                    if (GetFileTime(hFile, &ftCreate, &ftAccess, &ftWrite)) {
+                        // Convert the last-write time to local time.
+                        FileTimeToSystemTime(&ftWrite, &stUTC);
+                        SystemTimeToTzSpecificLocalTime(NULL, &stUTC, &stLocal);
+                        
+                        //Convert to NSDate:
+                        NSDateComponents *comps = [[NSDateComponents alloc] init];
+                        [comps setDay:stLocal.wDay];
+                        [comps setMonth:stLocal.wMonth];
+                        [comps setYear:stLocal.wYear];
+                        [comps setHour:stLocal.wHour];
+                        [comps setMinute:stLocal.wMinute];
+                        [comps setSecond:stLocal.wSecond];
+                        NSDate *date = [[NSCalendar currentCalendar] dateFromComponents:comps];
+                        
+                        creationDate = date;
+                    }
+                    else {
+                        creationDate = [NSDate date];
+                        fprintf(stderr, "DDLogFileInfo: GetFileTime error\n");
+                    }
+                    CloseHandle(hFile);
+                }
+                else {
+                    creationDate = [NSDate date];
+                    //fprintf(stderr, "DDLogFileInfo: CreateFile error\n");//This is expected on new file
+                }
+            }
+            else {
+                creationDate = [NSDate date];
+                fprintf(stderr, "DDLogFileInfo: File Not Found\n");
+            }
+        }
+        #else
+        {
+            creationDate = [[[self fileAttributes] objectForKey:NSFileCreationDate] retain];
+        }
+        #endif
 		
 	#endif
 		
@@ -1171,7 +1245,7 @@
 - (BOOL)isArchived
 {
 	
-#if TARGET_IPHONE_SIMULATOR
+#if TARGET_IPHONE_SIMULATOR || __COCOTRON__
 	
 	// Extended attributes don't work properly on the simulator.
 	// So we have to use a less attractive alternative.
@@ -1259,7 +1333,7 @@
 #pragma mark Attribute Management
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if TARGET_IPHONE_SIMULATOR
+#if TARGET_IPHONE_SIMULATOR || __COCOTRON__
 
 // Extended attributes don't work properly on the simulator.
 // So we have to use a less attractive alternative.

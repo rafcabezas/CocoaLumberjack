@@ -2,9 +2,14 @@
 
 #import <pthread.h>
 #import <objc/runtime.h>
+#import <libkern/OSAtomic.h>
+
+#ifdef __COCOTRON__
+#include <windows.h>
+#else
 #import <mach/mach_host.h>
 #import <mach/host_info.h>
-#import <libkern/OSAtomic.h>
+#endif
 
 
 /**
@@ -135,6 +140,12 @@
 			
 			queueSemaphore = dispatch_semaphore_create(LOG_MAX_QUEUE_SIZE);
 			
+#ifdef __COCOTRON__
+            SYSTEM_INFO sysinfo;
+            GetSystemInfo( &sysinfo );
+            
+            unsigned int result = (unsigned int)sysinfo.dwNumberOfProcessors;
+#else
 			// Figure out how many processors are available.
 			// This may be used later for an optimization on uniprocessor machines.
 			
@@ -145,8 +156,9 @@
 			host_info(mach_host_self(), HOST_BASIC_INFO, (host_info_t)&hostInfo, &infoCount);
 			
 			unsigned int result = (unsigned int)(hostInfo.max_cpus);
+#endif
 			unsigned int one    = (unsigned int)(1);
-			
+            
 			numProcessors = MAX(result, one);
 			
 			NSLogDebug(@"DDLog: numProcessors = %u", numProcessors);
@@ -1212,7 +1224,11 @@ NSString *ExtractFileNameWithoutExtension(const char *filePath, BOOL copy)
 		
 		timestamp = [[NSDate alloc] init];
 		
+#ifdef __COCOTRON__
+        machThreadID = 0;
+#else
 		machThreadID = pthread_mach_thread_np(pthread_self());
+#endif
         
         if (IS_GCD_AVAILABLE)
         {

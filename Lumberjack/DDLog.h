@@ -107,11 +107,15 @@
     #endif
   
   #else                                    // 10.6 not supported
-
-    #define IS_GCD_AVAILABLE      NO
-    #define GCD_MAYBE_AVAILABLE   0
-    #define GCD_MAYBE_UNAVAILABLE 1
-
+    #ifdef COCOTRON
+        #define IS_GCD_AVAILABLE      YES
+        #define GCD_MAYBE_AVAILABLE   1
+        #define GCD_MAYBE_UNAVAILABLE 0
+    #else
+        #define IS_GCD_AVAILABLE      NO
+        #define GCD_MAYBE_AVAILABLE   0
+        #define GCD_MAYBE_UNAVAILABLE 1
+    #endif
   #endif
 
 #endif
